@@ -228,17 +228,24 @@ const opp={x:710,hp:100,aim:.7,ch:0,ar:[],at:0,round:0,wins:0,on:false};
 let mine=[],stuck=[],parts=[],floats=[],hitSeen=new Set(),charging=false,chT=0,tk=0,ptr={x:400,y:200},keyAim=false,dummyHits=0;const keys={};
 const hash=s=>{let h=7;for(const c of s)h=(h*31+c.charCodeAt(0))>>>0;return h};
 
-// ---------- Ağ (room capability, sadece presence) ----------
-async function connect(c){
-  try{if(!(window.claude&&claude.use))return;const r=await claude.use('room');if(!r)return;let rm=r;try{rm=await r.join('ok-'+c.toLowerCase())}catch(e){rm=r}
-    room=rm;rm.onPeers(ch=>{snap=ch.peers},()=>{room=null});}catch(e){room=null}}
+// ---------- Ağ (WebRTC / PeerJS, oda kodu ile) ----------
+let peer=null,conn=null,net='idle',rx=null;
+const PEER_URLS=['https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js','https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js'];
+function loadPeer(cb,i=0){if(window.Peer)return cb();if(i>=PEER_URLS.length){net='err';return}const s=document.createElement('script');s.src=PEER_URLS[i];s.onload=cb;s.onerror=()=>loadPeer(cb,i+1);document.head.appendChild(s)}
+function cleanup(){try{conn&&conn.close()}catch(e){}try{peer&&peer.destroy()}catch(e){}conn=peer=null;net='idle';opp.on=false;rx=null}
+function lost(msg){if(mode!=='play')return;mode='menu';cleanup();me.wins=0;opp.wins=0;opp.round=0;reset(0);showOv('Bağlantı koptu',msg,'Menüye dön',menu)}
+function hook(c){conn=c;c.on('open',()=>{net='ok'});c.on('data',d=>{if(d&&d.full){lost('Bu oda dolu (2 kişi oynuyor). Başka bir kod dene.');return}rx=d});c.on('close',()=>lost('Rakip ayrıldı veya bağlantı kesildi.'));c.on('error',()=>{})}
+function connect(c,n=0){net='wait';loadPeer(()=>{const id='zokito-ok-'+c.toLowerCase();peer=new Peer(id);
+  peer.on('open',()=>{peer.on('connection',cn=>{if(conn){cn.on('open',()=>{cn.send({full:1});setTimeout(()=>cn.close(),300)});return}hook(cn)})});
+  peer.on('error',e=>{if(e.type==='unavailable-id'){peer=new Peer();peer.on('open',()=>hook(peer.connect(id)));
+      peer.on('error',e2=>{if(e2.type==='peer-unavailable'&&n<4){try{peer.destroy()}catch(_){}peer=null;setTimeout(()=>connect(c,n+1),1500)}else net='err'})}else net='err'})})}
 function sync(now){
-  const pl=snap.filter(p=>p.kind==='viewer').sort((a,b)=>a.peer<b.peer?-1:1),mi=pl.findIndex(p=>p.isMe&&p.sameTab),o=pl.slice(0,2).find(p=>!(p.isMe&&p.sameTab));
-  opp.on=!!(o&&mi>=0&&mi<2);if(!opp.on)return;
-  const q=o.presence;if(typeof q.hp==='number')opp.hp=q.hp;if(typeof q.aim==='number')opp.aim=q.aim;if(typeof q.ch==='number')opp.ch=q.ch;opp.hits=Array.isArray(q.hits)?q.hits:[];opp.round=q.round|0;
+  opp.on=!!(conn&&conn.open&&net==='ok'&&rx);if(!opp.on)return;
+  const q=rx;if(typeof q.hp==='number')opp.hp=q.hp;if(typeof q.aim==='number')opp.aim=q.aim;if(typeof q.ch==='number')opp.ch=q.ch;opp.hits=Array.isArray(q.hits)?q.hits:[];opp.round=q.round|0;
   if(q.ar!==opp.rawAr&&Array.isArray(q.ar)){opp.rawAr=q.ar;opp.ar=q.ar.map(a=>[a[0],W-a[1],a[2],-a[3],a[4]]);opp.at=now}
 }
-function pub(){if(!room)return;room.presence({hp:me.hp,aim:+me.aim.toFixed(2),ch:+me.ch.toFixed(2),ar:mine.map(a=>[a.id,a.x|0,a.y|0,a.vx|0,a.vy|0]),hits:me.hits,round:me.round}).catch(()=>{})}
+function pub(){if(!conn||!conn.open)return;try{conn.send({hp:me.hp,aim:+me.aim.toFixed(2),ch:+me.ch.toFixed(2),ar:mine.map(a=>[a.id,a.x|0,a.y|0,a.vx|0,a.vy|0]),hits:me.hits,round:me.round})}catch(e){}}
+const myPts=()=>opp.on?Math.round((100-opp.hp)/20):dummyHits,oppPts=()=>Math.round((100-me.hp)/20);
 
 // ---------- Oyun mantığı ----------
 function reset(r){me.hp=100;me.round=r;me.hits=[];me.ch=0;mine=[];stuck=[];over=false;charging=false;hideOv()}
@@ -260,8 +267,8 @@ function update(dt,now){
   if(opp.on&&!over){const dtp=Math.min(.2,now-opp.at);
     for(const a of opp.ar){if(hitSeen.has(a[0]))continue;const vx=a[3],vy=a[4]+GR*dtp,px=a[1]+a[3]*dtp,py=a[2]+a[4]*dtp+.5*GR*dtp*dtp,sp=Math.hypot(vx,vy)||1;
       let h=0;for(const k of[0,13,26])h=Math.max(h,hitMe(px-vx/sp*k,py-vy/sp*k));
-      if(h){hitSeen.add(a[0]);const dmg=Math.round((h===2?42:22)*(.5+.5*Math.min(1,sp/650)));me.hp=Math.max(0,me.hp-dmg);me.hits.push(a[0]);if(me.hits.length>10)me.hits.shift();
-        shake=h===2?12:7;h===2?SFX.head():SFX.body();fx(me.x,GY-(h===2?78:50),'#d22',14,180);floats.push({x:me.x,y:GY-100,l:1.2,txt:'-'+dmg+(h===2?' KAFA!':''),c:'#ff6b6b'});
+      if(h){hitSeen.add(a[0]);const dmg=20;me.hp=Math.max(0,me.hp-dmg);me.hits.push(a[0]);if(me.hits.length>10)me.hits.shift();
+        shake=h===2?12:7;h===2?SFX.head():SFX.body();fx(me.x,GY-(h===2?78:50),'#d22',14,180);floats.push({x:me.x,y:GY-100,l:1.2,txt:(h===2?'KAFA! ':'')+'VURULDUN',c:'#ff6b6b'});
         if(me.hp<=0)finish(false)}}
     if(opp.round===me.round&&opp.hp<=0&&!over)finish(true)}
   for(let i=parts.length-1;i>=0;i--){const p=parts[i];p.l-=dt;if(p.l<=0){parts.splice(i,1);continue}p.x+=p.vx*dt;p.y+=p.vy*dt;p.vy+=420*dt}
@@ -269,7 +276,7 @@ function update(dt,now){
   for(let i=stuck.length-1;i>=0;i--){stuck[i].l-=dt;if(stuck[i].l<=0)stuck.splice(i,1)}
 }
 function finish(win){over=true;charging=false;win?(me.wins++,SFX.win()):(opp.wins++,SFX.lose());
-  setTimeout(()=>showOv(win?'Kazandın!':'Kaybettin','Skor — Sen '+me.wins+' : '+opp.wins+' Rakip','Tekrar oyna',()=>reset(me.round+1)),700)}
+  setTimeout(()=>showOv(win?'Kazandın!':'Kaybettin','Maç skoru — Sen '+me.wins+' : '+opp.wins+' Rakip','Tekrar oyna',()=>reset(me.round+1)),700)}
 
 // ---------- Çizim ----------
 const cl=[];for(let i=0;i<6;i++)cl.push({x:Math.random()*W,y:30+Math.random()*100,s:.8+Math.random()});
@@ -306,17 +313,17 @@ function draw(now){x.setTransform(K_,0,0,K_,0,0);
   for(const p of parts){x.globalAlpha=Math.max(0,p.l/p.m);x.fillStyle=p.c;x.fillRect(p.x-p.s/2,p.y-p.s/2,p.s,p.s)}x.globalAlpha=1;
   x.font='bold 15px system-ui';x.textAlign='center';x.lineWidth=3;x.strokeStyle='#000a';for(const f of floats){x.globalAlpha=Math.min(1,f.l*2);x.fillStyle=f.c;x.strokeText(f.txt,f.x,f.y);x.fillText(f.txt,f.x,f.y)}x.globalAlpha=1;x.restore();
   // HUD
-  x.font='bold 13px system-ui';x.textAlign='left';x.fillStyle='#fff';x.strokeStyle='#0008';x.strokeText('SEN  '+me.hp,12,22);x.fillText('SEN  '+me.hp,12,22);
-  x.textAlign='center';const st=opp.on?'Skor '+me.wins+' : '+opp.wins:'Rakip bekleniyor… Oda: '+code+(dummyHits?' · hedef '+dummyHits:'');x.strokeText(st,W/2,22);x.fillText(st,W/2,22);
-  if(opp.on){x.textAlign='right';x.strokeText('RAKİP  '+opp.hp,W-44,22);x.fillText('RAKİP  '+opp.hp,W-44,22)}
+  x.font='bold 13px system-ui';x.textAlign='left';x.fillStyle='#fff';x.strokeStyle='#0008';x.strokeText('SEN  '+myPts()+' / 5',12,22);x.fillText('SEN  '+myPts()+' / 5',12,22);
+  x.textAlign='center';const st=opp.on?'Oda '+code+' · Maç '+me.wins+' : '+opp.wins:(net==='err'?'Bağlantı kurulamadı, sayfayı yenile':'Rakip bekleniyor… Oda kodu: '+code);x.strokeText(st,W/2,22);x.fillText(st,W/2,22);
+  if(opp.on){x.textAlign='right';x.strokeText('RAKİP  '+oppPts()+' / 5',W-44,22);x.fillText('RAKİP  '+oppPts()+' / 5',W-44,22)}
   if(charging&&!over){x.fillStyle='#0009';x.fillRect(W/2-60,H-26,120,10);x.fillStyle=`hsl(${120-me.ch*120},85%,55%)`;x.fillRect(W/2-59,H-25,118*me.ch,8)}
 }
 
 // ---------- Arayüz ----------
 function showOv(h,p,b,fn,inp){ov.style.display='flex';ov.innerHTML='<h1>'+h+'</h1><p>'+p+'</p>'+(inp?'<input id="code" maxlength="8" value="'+inp+'" aria-label="Oda kodu">':'')+'<button>'+b+'</button>';ov.querySelector('button').onclick=()=>{initAudio();fn()}}
 function hideOv(){ov.style.display='none'}
-function menu(){const rc=Math.random().toString(36).slice(2,6).toUpperCase();
-  showOv('Ok Düellosu','Basılı tut: ok gerilir, tutukça daha hızlı gider. Mouse/parmakla nişan al, bırakınca ateşle. Kafa vuruşu 2 kat vurur.<br>Arkadaşın bu sayfayı açıp <b>aynı oda kodunu</b> girsin.','Odaya gir',()=>{code=(document.getElementById('code').value||rc).trim().toUpperCase().slice(0,8);tower.h=70+hash(code)%80;hideOv();mode='play';connect(code)},rc)}
+function menu(){const rc=Math.random().toString(36).slice(2,7).toUpperCase();
+  showOv('Ok Düellosu','Basılı tut: ok gerilir, tutukça daha hızlı gider. Mouse/parmakla nişan al, bırakınca ateşle. <b>Rakibi ilk 5 kez vuran kazanır.</b><br>Kodu arkadaşına ver, o da <b>aynı kodu</b> girip &quot;Odaya gir&quot;e bassın.','Odaya gir',()=>{code=((document.getElementById('code').value||rc).toUpperCase().replace(/[^A-Z0-9]/g,'').slice(0,8))||rc;tower.h=70+hash(code)%80;hideOv();mode='play';connect(code)},rc)}
 const pos=e=>{const r=cv.getBoundingClientRect();return{x:(e.clientX-r.left)*W/r.width,y:(e.clientY-r.top)*H/r.height}};
 cv.addEventListener('pointerdown',e=>{e.preventDefault();initAudio();keyAim=false;ptr=pos(e);if(mode!=='play'||over)return;charging=true;chT=0;try{cv.setPointerCapture(e.pointerId)}catch(_){}});
 cv.addEventListener('pointermove',e=>{ptr=pos(e);keyAim=false});
@@ -870,7 +877,7 @@ requestAnimationFrame(loop);
 const GAMES=[
 {name:'Blok Patlat',id:'blockblast',emoji:'🧩',color:'#5b3fd1',desc:'Blokları yerleştir, satırları patlat, kombo yap!',cat:'Bulmaca',featured:true},
 {name:'2048',id:'g2048',emoji:'🔢',color:'#e0a030',desc:'Sayıları birleştir, 2048\'e ulaş!',cat:'Bulmaca'},
-{name:'Ok Düellosu',id:'ok',emoji:'🏹',color:'#b8472f',desc:'Okunu at, düelloyu kazan!',cat:'Aksiyon'},
+{name:'Ok Düellosu',id:'ok',emoji:'🏹',color:'#b8472f',desc:'Online oda kodu, 5 vuruşta kazan!',cat:'Aksiyon'},
 {name:'DX Ball',id:'dxball',emoji:'🧱',color:'#2f7fd1',desc:'Topu zıplat, tuğlaları kır!',cat:'Arcade'},
 {name:'Zıpla',id:'flappy',emoji:'🐤',color:'#3aa6d9',desc:'Borulara çarpmadan geç!',cat:'Arcade'},
 {name:'Yıldız Savaşı',id:'yildiz',emoji:'🚀',color:'#4b3fd1',desc:'Uzay gemisiyle düşmanları vur!',cat:'Aksiyon'},

@@ -1,0 +1,403 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>OyunKöşesi Paneli</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,800&family=Instrument+Sans:wght@400;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #eef1f7;
+    --surface: #ffffff;
+    --ink: #1c2340;
+    --muted: #66708f;
+    --line: #dde2ee;
+    --live: #14b08f;
+    --hot: #ef4268;
+    --coin: #ffc233;
+    --track: #e7ebf4;
+    --display: "Bricolage Grotesque", "Trebuchet MS", system-ui, sans-serif;
+    --body: "Instrument Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  :root:not([data-theme="light"]) {
+    color-scheme: light dark;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #121629;
+      --surface: #1b2140;
+      --ink: #eef1fb;
+      --muted: #9aa3c4;
+      --line: #2b3256;
+      --track: #262d52;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #121629;
+    --surface: #1b2140;
+    --ink: #eef1fb;
+    --muted: #9aa3c4;
+    --line: #2b3256;
+    --track: #262d52;
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--body);
+    font-size: 16px;
+    line-height: 1.5;
+    min-height: 100vh;
+  }
+  [hidden] { display: none !important; }
+  :focus-visible { outline: 3px solid var(--coin); outline-offset: 2px; }
+
+  .wrap { max-width: 980px; margin: 0 auto; padding: 24px 16px 56px; }
+
+  header.top {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 12px; margin-bottom: 20px;
+  }
+  .brand { font-family: var(--display); font-weight: 800; font-size: 1.35rem; letter-spacing: -0.01em; }
+  .brand span { color: var(--hot); }
+  .top-right { display: flex; align-items: center; gap: 14px; font-size: 0.875rem; color: var(--muted); }
+  .status { display: inline-flex; align-items: center; gap: 6px; }
+  .status i { width: 8px; height: 8px; border-radius: 50%; background: var(--live); display: inline-block; }
+  .status.off i { background: var(--hot); }
+  button.ghost {
+    font: inherit; font-size: 0.875rem; color: var(--ink); background: transparent;
+    border: 1px solid var(--line); border-radius: 8px; padding: 6px 12px; cursor: pointer;
+  }
+  button.ghost:hover { border-color: var(--muted); }
+
+  /* ---- üst alan ---- */
+  .hero { display: grid; grid-template-columns: 1.6fr 1fr; gap: 16px; }
+  .live {
+    background: var(--surface); border: 1px solid var(--line); border-radius: 20px;
+    padding: 24px 26px 18px; position: relative; overflow: hidden;
+  }
+  .live h2 { margin: 0; font-size: 1rem; font-weight: 600; color: var(--muted); display: flex; align-items: center; gap: 8px; }
+  .pulse { width: 10px; height: 10px; border-radius: 50%; background: var(--live); position: relative; }
+  .pulse::after {
+    content: ""; position: absolute; inset: 0; border-radius: 50%; background: var(--live);
+    animation: ping 1.8s ease-out infinite;
+  }
+  @keyframes ping { from { transform: scale(1); opacity: .7; } to { transform: scale(3.2); opacity: 0; } }
+  .live .big {
+    font-family: var(--display); font-weight: 800; font-size: clamp(4.5rem, 14vw, 7.5rem);
+    line-height: 1; letter-spacing: -0.04em; margin: 6px 0 4px; font-variant-numeric: tabular-nums;
+  }
+  .live .sub { color: var(--muted); font-size: 0.875rem; margin: 0 0 8px; }
+  .spark { display: block; width: 100%; height: 56px; margin-top: 6px; }
+  .spark .area { fill: var(--live); opacity: 0.14; }
+  .spark .line { fill: none; stroke: var(--live); stroke-width: 2.5; stroke-linejoin: round; stroke-linecap: round; vector-effect: non-scaling-stroke; }
+
+  .side { display: grid; grid-template-rows: 1fr 1fr; gap: 16px; }
+  .stat {
+    background: var(--surface); border: 1px solid var(--line); border-radius: 20px; padding: 20px 22px;
+    display: flex; flex-direction: column; justify-content: center;
+  }
+  .stat .label { color: var(--muted); font-size: 0.9rem; font-weight: 600; }
+  .stat .num { font-family: var(--display); font-weight: 800; font-size: 2.6rem; line-height: 1.1; font-variant-numeric: tabular-nums; }
+  .stat .hint { color: var(--muted); font-size: 0.8rem; }
+
+  /* ---- skor tablosu ---- */
+  .board { margin-top: 28px; }
+  .board h2 { font-family: var(--display); font-size: 1.5rem; margin: 0 0 4px; letter-spacing: -0.01em; }
+  .board .lead { margin: 0 0 14px; color: var(--muted); font-size: 0.9rem; }
+  .cols, .row {
+    display: grid; grid-template-columns: 44px minmax(120px, 1.2fr) 2fr 70px 90px 90px;
+    align-items: center; gap: 12px;
+  }
+  .cols { padding: 0 16px 8px; color: var(--muted); font-size: 0.8rem; font-weight: 600; }
+  .cols span:nth-child(n+4), .row .f { text-align: right; }
+  .rows { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+  .row { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 14px 16px; }
+  .rank { font-family: var(--display); font-weight: 800; font-size: 1.4rem; color: var(--muted); }
+  .row:first-child .rank { color: var(--coin); text-shadow: 0 0 0 var(--coin); }
+  .name { font-weight: 600; overflow-wrap: anywhere; }
+  .track { height: 12px; background: var(--track); border-radius: 99px; overflow: hidden; }
+  .fill { height: 100%; background: var(--hot); border-radius: 99px; width: 0; transition: width .5s ease; }
+  .row:first-child .fill { background: var(--coin); }
+  .f { font-variant-numeric: tabular-nums; font-weight: 600; }
+  .f.on { color: var(--live); }
+  .m { display: none; }
+
+  .empty {
+    background: var(--surface); border: 1px dashed var(--line); border-radius: 14px;
+    padding: 28px 20px; color: var(--muted); text-align: center;
+  }
+
+  /* ---- giriş ---- */
+  .login { max-width: 360px; margin: 14vh auto 0; background: var(--surface); border: 1px solid var(--line); border-radius: 20px; padding: 28px; }
+  .login h1 { font-family: var(--display); font-size: 1.6rem; margin: 0 0 4px; }
+  .login p { margin: 0 0 18px; color: var(--muted); font-size: 0.9rem; }
+  .login input {
+    width: 100%; font: inherit; color: var(--ink); background: var(--bg); border: 1px solid var(--line);
+    border-radius: 10px; padding: 12px 14px; margin-bottom: 12px;
+  }
+  .login button {
+    width: 100%; font: inherit; font-weight: 600; color: #1c2340; background: var(--coin);
+    border: 0; border-radius: 10px; padding: 12px; cursor: pointer;
+  }
+  .login .err { color: var(--hot); font-size: 0.875rem; min-height: 1.3em; margin: 10px 0 0; }
+
+  @media (max-width: 760px) {
+    .hero { grid-template-columns: 1fr; }
+    .side { grid-template-rows: none; grid-template-columns: 1fr 1fr; }
+    .stat .num { font-size: 2rem; }
+    .cols { display: none; }
+    .row { grid-template-columns: 36px 1fr; row-gap: 8px; }
+    .row .track { grid-column: 1 / -1; }
+    .row .f { display: none; }
+    .m { display: flex; grid-column: 1 / -1; gap: 14px; flex-wrap: wrap; font-size: 0.85rem; color: var(--muted); }
+    .m b { color: var(--ink); font-variant-numeric: tabular-nums; }
+    .m b.on { color: var(--live); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .pulse::after { animation: none; }
+    .fill { transition: none; }
+  }
+</style>
+</head>
+<body>
+
+<!-- Giriş -->
+<main class="login" id="login" hidden>
+  <h1>Panel girişi</h1>
+  <p>Firebase'de eklediğin e-posta ve şifreyle gir.</p>
+  <form id="loginForm">
+    <input type="email" id="email" placeholder="E-posta" autocomplete="username" required>
+    <input type="password" id="pass" placeholder="Şifre" autocomplete="current-password" required>
+    <button type="submit">Giriş yap</button>
+  </form>
+  <p class="err" id="err" role="alert"></p>
+</main>
+
+<!-- Panel -->
+<div class="wrap" id="dash" hidden>
+  <header class="top">
+    <div class="brand">Oyun<span>Köşesi</span></div>
+    <div class="top-right">
+      <span class="status" id="status"><i></i><span id="statusText">Bağlanıyor…</span></span>
+      <button class="ghost" id="logout" type="button">Çıkış</button>
+    </div>
+  </header>
+
+  <section class="hero">
+    <div class="live">
+      <h2><span class="pulse"></span> Şu an sitede</h2>
+      <div class="big" id="online">0</div>
+      <p class="sub">Sitede şu an açık olan farklı kişi sayısı. Biri sayfayı kapattığı an düşer. Grafik, panel açık kaldığı sürece son birkaç dakikayı gösterir.</p>
+      <svg class="spark" viewBox="0 0 300 56" preserveAspectRatio="none" aria-hidden="true">
+        <polygon class="area" id="area" points=""/>
+        <polyline class="line" id="line" points=""/>
+      </svg>
+    </div>
+    <div class="side">
+      <div class="stat">
+        <span class="label">Toplam giriş</span>
+        <span class="num" id="total">0</span>
+        <span class="hint">Siteye açılan her oturum</span>
+      </div>
+      <div class="stat">
+        <span class="label">Farklı ziyaretçi</span>
+        <span class="num" id="unique">0</span>
+        <span class="hint">Tarayıcı bazlı sayılır</span>
+      </div>
+    </div>
+  </section>
+
+  <section class="board">
+    <h2>Oyun sıralaması</h2>
+    <p class="lead">En çok açılan oyun en üstte.</p>
+    <div class="cols" aria-hidden="true">
+      <span></span><span>Oyun</span><span></span><span>Online</span><span>Oynayan</span><span>Açılma</span>
+    </div>
+    <ol class="rows" id="rows"></ol>
+  </section>
+</div>
+
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+import { getDatabase, ref, onValue } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
+import { getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+
+// Firebase konsolundan kopyaladığın ayarları buraya yapıştır
+const firebaseConfig = {
+  apiKey: "AIzaSyCCZx8cYo9SGqGtUUtjYJaeZnVgCWFnLzw",
+  authDomain: "zokito-502db.firebaseapp.com",
+  databaseURL: "https://zokito-502db-default-rtdb.europe-west1.firebasedatabase.app",
+  projectId: "zokito-502db",
+  appId: "1:808914509103:web:be593284a1ba5da37d55da"
+};
+
+const app = initializeApp(firebaseConfig);
+const db = getDatabase(app);
+const auth = getAuth(app);
+
+const $ = (id) => document.getElementById(id);
+const fmt = (n) => Number(n || 0).toLocaleString('tr-TR');
+
+let online = {};
+let stats = {};
+let history = [];
+let unsubs = [];
+let sampler = null;
+
+function show(view) {
+  $('login').hidden = view !== 'login';
+  $('dash').hidden = view !== 'dash';
+}
+
+function setStatus(ok, text) {
+  $('status').classList.toggle('off', !ok);
+  $('statusText').textContent = text;
+}
+
+function drawSpark() {
+  const w = 300, h = 56, pad = 4;
+  const max = Math.max(1, ...history);
+  const n = history.length;
+  if (!n) return;
+  const pts = history.map((v, i) => {
+    const x = n === 1 ? w : pad + (i / (n - 1)) * (w - pad * 2);
+    const y = h - pad - (v / max) * (h - pad * 2);
+    return x.toFixed(1) + ',' + y.toFixed(1);
+  });
+  if (n === 1) pts.unshift('0,' + pts[0].split(',')[1]);
+  $('line').setAttribute('points', pts.join(' '));
+  $('area').setAttribute('points', pts.join(' ') + ' ' + w + ',' + h + ' 0,' + h);
+}
+
+function cell(cls, text) {
+  const s = document.createElement('span');
+  s.className = cls;
+  s.textContent = text;
+  return s;
+}
+
+function compute() {
+  // Aynı kişi birden fazla sekme açtıysa tek kişi sayılır
+  const people = new Set();
+  const perGame = {};
+  Object.values(online || {}).forEach((o) => {
+    if (!o || !o.v) return;
+    people.add(o.v);
+    (perGame[o.game] = perGame[o.game] || new Set()).add(o.v);
+  });
+
+  const g = (stats && stats.games) || {};
+  const names = new Set([...Object.keys(g), ...Object.keys(perGame)]);
+  return {
+    online: people.size,
+    totalVisits: (stats && stats.total) || 0,
+    uniqueVisitors: (stats && stats.unique) || 0,
+    games: [...names].map((name) => ({
+      name,
+      plays: (g[name] && g[name].plays) || 0,
+      players: (g[name] && g[name].players) || 0,
+      online: perGame[name] ? perGame[name].size : 0
+    }))
+  };
+}
+
+function render() {
+  const d = compute();
+  $('online').textContent = fmt(d.online);
+  $('total').textContent = fmt(d.totalVisits);
+  $('unique').textContent = fmt(d.uniqueVisitors);
+
+  const rows = $('rows');
+  rows.textContent = '';
+  const games = d.games.sort((a, b) => b.plays - a.plays || b.online - a.online);
+
+  if (!games.length) {
+    const e = document.createElement('li');
+    e.className = 'empty';
+    e.textContent = 'Henüz oyun verisi yok. Sayfalara tracker.js eklenip biri siteye girince burada görünecek.';
+    rows.appendChild(e);
+    return;
+  }
+
+  const max = Math.max(1, ...games.map((g) => g.plays));
+  games.forEach((g, i) => {
+    const li = document.createElement('li');
+    li.className = 'row';
+    li.appendChild(cell('rank', String(i + 1)));
+    li.appendChild(cell('name', g.name));
+
+    const track = document.createElement('div');
+    track.className = 'track';
+    const fill = document.createElement('div');
+    fill.className = 'fill';
+    fill.style.width = Math.round((g.plays / max) * 100) + '%';
+    track.appendChild(fill);
+    li.appendChild(track);
+
+    li.appendChild(cell('f on', fmt(g.online)));
+    li.appendChild(cell('f', fmt(g.players)));
+    li.appendChild(cell('f', fmt(g.plays)));
+
+    const m = document.createElement('div');
+    m.className = 'm';
+    [['Online', g.online, 'on'], ['Oynayan', g.players, ''], ['Açılma', g.plays, '']].forEach((x) => {
+      const sp = document.createElement('span');
+      sp.appendChild(document.createTextNode(x[0] + ' '));
+      const b = document.createElement('b');
+      if (x[2]) b.className = x[2];
+      b.textContent = fmt(x[1]);
+      sp.appendChild(b);
+      m.appendChild(sp);
+    });
+    li.appendChild(m);
+    rows.appendChild(li);
+  });
+}
+
+function listen() {
+  unlisten();
+  const onErr = () => setStatus(false, 'Yetki yok veya bağlantı koptu');
+  unsubs.push(onValue(ref(db, 'online'), (s) => { online = s.val() || {}; render(); }, onErr));
+  unsubs.push(onValue(ref(db, 'stats'), (s) => { stats = s.val() || {}; render(); }, onErr));
+  unsubs.push(onValue(ref(db, '.info/connected'), (s) => {
+    setStatus(!!s.val(), s.val() ? 'Canlı' : 'Bağlantı yok, tekrar deneniyor');
+  }));
+  sampler = setInterval(() => {
+    history.push(compute().online);
+    if (history.length > 60) history.shift();
+    drawSpark();
+  }, 5000);
+}
+
+function unlisten() {
+  unsubs.forEach((u) => u());
+  unsubs = [];
+  if (sampler) { clearInterval(sampler); sampler = null; }
+}
+
+onAuthStateChanged(auth, (user) => {
+  if (user) { history = []; show('dash'); listen(); }
+  else { unlisten(); show('login'); }
+});
+
+$('loginForm').addEventListener('submit', async (ev) => {
+  ev.preventDefault();
+  $('err').textContent = '';
+  try {
+    await signInWithEmailAndPassword(auth, $('email').value.trim(), $('pass').value);
+    $('pass').value = '';
+  } catch (e) {
+    $('err').textContent = 'E-posta veya şifre yanlış.';
+  }
+});
+
+$('logout').addEventListener('click', () => signOut(auth));
+</script>
+</body>
+</html>

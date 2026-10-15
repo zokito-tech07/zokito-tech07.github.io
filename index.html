@@ -1116,6 +1116,7 @@ h1 small{display:block;font-size:11px;letter-spacing:1px;font-weight:400;opacity
 <div id="hint">WASD hareket (baktığın yöne vurursun) · Boşluk / Tık: vur · Tab: skor · 2 sn temas sonrası vur: Power Shot</div>
 <button id="mute" aria-label="Ses">🔊</button>
 <div id="touch"><div id="joy"><div id="knob"></div></div><div id="kb">VUR</div></div>
+<script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js"></script>
 <script>
 const $=id=>document.getElementById(id),cv=$('c'),x=cv.getContext('2d'),ui=$('ui');
 const FW=1200,FH=580,GD=70,GW=200,GY0=(FH-GW)/2,PR=22,BR=14,MAXV=212;
@@ -1157,7 +1158,7 @@ $('mute').onclick=()=>{muted=!muted;$('mute').textContent=muted?'🔇':'🔊'};
 const BOTN=['Leo','Mrnonchalant','Cr7fan','koolcheems86','Pasha','Zeki','Mert','Aslan','Deniz','Kaan','Efe','Ronaldinho'];
 const WIN=3;let hudGe=0,goalAt=-9;
 let G=null,scene='menu',paused=false,modeSel='1v1',wantReal=true,myName=ls('bb_name','Sen'),myPeer='local',tgt=null,qT=0,uiT=0,tTime=0,toastT=0,toastTxt='',showTab=false;
-let net=null,roomNet=null,p2p=null,snap=[],netReady=false;const QWAIT=10;const done=new Set();
+let net=null,roomNet=null,p2p=null,snap=[],netReady=false,lob=null,lastKey=null;const QWAIT=10;const done=new Set();
 const cam={x:FW/2,y:FH/2,z:1},mouse={x:0,y:0,on:false},keys={};let joy={x:0,y:0},tAim=null,pubT=0;
 const peersAll=()=>snap.filter(p=>p.kind==='viewer');
 const toast=m=>{toastTxt=m;toastT=2.6};
@@ -1188,8 +1189,57 @@ function hostMatch(pl){const id=Math.random().toString(36).slice(2,8),m=tgt.mode
   G.me&&(G.me.name=myName);go()}
 function joinMatch(hp,m){done.add(m.id);G=mkGame(m.mode,m.pl,m.nm,false,m.id);G.client=true;G.hostPeer=hp;G.me=G.pl.find(p=>p.peer===myPeer);G.hasSt=false;go()}
 function go(){scene='play';paused=false;ui.innerHTML='';$('bot').style.display='block';$('hint').style.display=isTouch?'none':'block';tgt&&(tgt.manual=0)}
-function leave(msg){if(G&&G.id)done.add(G.id);G=null;scene='menu';if(msg)setTimeout(()=>toast(msg),50);$('bot').style.display='none';$('hint').style.display='none';demo();menu()}
+function leave(msg){if(G&&G.id)done.add(G.id);G=null;scene='menu';lobbyClose();if(msg)setTimeout(()=>toast(msg),50);$('bot').style.display='none';$('hint').style.display='none';demo();menu()}
 function demo(){G=mkGame('2v2',[],null,true,'demo',true);G.demo=true}
+
+// ---------- Kendi sitende online: PeerJS lobi (sunucu kurmadan) ----------
+const rid=n=>Math.random().toString(36).slice(2,2+n);
+const lobAvail=t=>!roomNet&&typeof Peer==='function'&&!t.cnErr;
+const lobbyBase=k=>'beatball1-'+(String(k).replace(/[^a-zA-Z0-9]+/g,'-').replace(/^-+|-+$/g,'')||'oda');
+const mkSnap=(l,myId)=>l.map(([id,pr])=>({peer:id,isMe:id===myId,sameTab:id===myId,kind:'viewer',guest:false,presence:pr||{},updatedAt:0}));
+function lobbyHub(hubId,cap){return new Promise((res,rej)=>{let done=false,p;const fin=(f,v)=>{if(done)return;done=true;clearTimeout(to);f(v)};
+  const to=setTimeout(()=>{try{p&&p.destroy()}catch(e){}fin(rej,new Error('timeout'))},9000);
+  try{p=new Peer(hubId,{debug:0})}catch(e){return fin(rej,e)}
+  p.on('error',e=>{if(done)return;try{p.destroy()}catch(_){}e&&e.type==='unavailable-id'?fin(res,null):fin(rej,e)});
+  p.on('open',()=>fin(res,hubAdapter(p,cap)))})}
+function hubAdapter(p,cap){const myId='a'+rid(6),mem=new Map();let mine={},seq=0,dead=false;
+  const build=()=>{const l=[[myId,mine]];for(const m of mem.values())l.push([m.id,m.pres]);return l};
+  const upd=()=>{if(net===ad)snap=mkSnap(build(),myId)};
+  const iv=setInterval(()=>{const now=performance.now();for(const[k,m]of mem)if(now-m.last>6000){try{m.conn.close()}catch(e){}mem.delete(k)}
+    const msg={t:'s',n:++seq,p:build()};for(const m of mem.values())try{m.conn.send(msg)}catch(e){}upd()},50);
+  p.on('connection',conn=>{let me=null;
+    conn.on('data',d=>{if(!d)return;
+      if(d.t==='join'){if(mem.get(conn.peer)){try{conn.send({t:'ok'})}catch(e){}return}
+        if(mem.size+1>=cap||mine.mid){try{conn.send({t:'full'})}catch(e){}setTimeout(()=>{try{conn.close()}catch(e){}},400);return}
+        me={id:String(d.id).slice(0,16),conn,pres:{nm:String(d.nm||'Oyuncu').slice(0,12)},last:performance.now(),n:0};mem.set(conn.peer,me);try{conn.send({t:'ok'})}catch(e){}}
+      else if(d.t==='p'&&me&&mem.get(conn.peer)===me&&d.n>me.n&&d.d&&JSON.stringify(d.d).length<2000){me.n=d.n;me.pres=d.d;me.last=performance.now()}});
+    conn.on('close',()=>{if(mem.get(conn.peer)&&(!me||mem.get(conn.peer)===me))mem.delete(conn.peer)})});
+  p.on('disconnected',()=>{try{p.reconnect()}catch(e){}});p.on('error',()=>{});
+  const ad={lobby:true,hub:true,presence(o){mine=o;upd();return Promise.resolve()},close(){if(dead)return;dead=true;clearInterval(iv);for(const m of mem.values())try{m.conn.close()}catch(e){}try{p.destroy()}catch(e){}if(net===ad){net=roomNet;snap=[]}if(lob===ad)lob=null}};
+  return ad}
+function lobbyMember(hubId){return new Promise(res=>{let done=false,p,c,ad=null,jv=0,iv=0,mine={},seq=0,lastN=0,lastRx=performance.now();const myId='b'+rid(6);
+  const fin=v=>{if(done)return;done=true;clearTimeout(to);res(v)};
+  const bail=()=>{clearInterval(jv);try{c&&c.close()}catch(e){}try{p&&p.destroy()}catch(e){}fin(null)};
+  const to=setTimeout(bail,7000);
+  try{p=new Peer({debug:0})}catch(e){return fin(null)}
+  p.on('error',()=>{if(!done)bail()});
+  p.on('open',()=>{c=p.connect(hubId,{serialization:'json'});
+    const join=()=>{try{c.send({t:'join',id:myId,nm:myName})}catch(e){}};
+    c.on('open',()=>{join();jv=setInterval(join,600)});c.on('error',()=>{if(!done)bail()});
+    c.on('close',()=>{if(!done)bail();else if(ad)ad.close()});
+    c.on('data',d=>{if(!d)return;
+      if(d.t==='ok'&&!done){clearInterval(jv);
+        iv=setInterval(()=>{if(performance.now()-lastRx>6000)ad.close()},1000);
+        ad={lobby:true,hub:false,presence(o){mine=o;if(c.open)try{c.send({t:'p',n:++seq,d:o})}catch(e){}return Promise.resolve()},close(){if(ad._d)return;ad._d=1;clearInterval(iv);try{c.close()}catch(e){}try{p.destroy()}catch(e){}if(net===ad){net=roomNet;snap=[]}if(lob===ad)lob=null;if(!ad._silent&&scene==='queue'){scene='menu';tgt=null;menu()}}};
+        fin(ad)}
+      else if(d.t==='full'&&!done)bail();
+      else if(d.t==='s'&&ad&&d.n>lastN&&Array.isArray(d.p)){lastN=d.n;lastRx=performance.now();if(net===ad)snap=mkSnap(d.p,myId)}})})})}
+async function lobbyConnect(base,cap,t){for(let slot=0;slot<8;slot++){if(scene!=='queue'||tgt!==t)return null;const id=base+'-'+slot;
+    const h=await lobbyHub(id,cap);if(h)return h;if(scene!=='queue'||tgt!==t)return null;
+    const m=await lobbyMember(id);if(m)return m}
+  throw new Error('no slot')}
+async function lobbyOpen(t){try{const ad=await lobbyConnect(lobbyBase(t.key),(t.manual||t.n>2)?4:2,t);if(!ad)return;if(scene!=='queue'||tgt!==t){ad._silent=1;ad.close();return}net=ad;lob=ad;snap=[]}catch(e){t.cnErr=1}}
+function lobbyClose(){if(lob){const a=lob;lob=null;a._silent=1;a.close()}}
 
 // ---------- Arkadaşla doğrudan bağlantı (hesapsız, kod ile / WebRTC) ----------
 const ICE={iceServers:[{urls:'stun:stun.l.google.com:19302'},{urls:'stun:stun1.l.google.com:19302'}]};
@@ -1227,10 +1277,11 @@ function p2pJoin(){const pc=new RTCPeerConnection(ICE);pc.ondatachannel=e=>p2pWi
     $('ans').innerHTML=`<p>2) Bu cevap kodunu arkadaşına geri gönder, o girince maç başlar:</p><textarea id="c2" readonly>${code}</textarea><button class="btn g" id="cp">Kopyala</button>`;$('cp').onclick=()=>copyTxt('c2');st.textContent='Arkadaşının bağlanmasını bekliyorum…'}catch(e){st.textContent='Kod geçersiz, tekrar yapıştır.'}}}
 
 // ---------- Eşleşme ----------
-function noNet(){scene='menu';tgt=null;ui.innerHTML=`<div class="panel wide"><h2>Online bağlantı yok</h2><p>Bu görünümde claude.ai oda bağlantısı kurulamadı (linki giriş yapmadan ya da herkese açık bağlantıyla açmış olabilirsin). Arkadaşınla oynamak için kod ile bağlanabilirsin.</p><button class="btn" id="a1">🔗 Kod ile bağlan</button><button class="btn g" id="a2">Botlarla oyna</button><button class="btn g" id="a3">Geri</button></div>`;
+function noNet(){scene='menu';tgt=null;ui.innerHTML=`<div class="panel wide"><h2>Online bağlantı yok</h2><p>Online sunucuya ulaşılamadı (internet bağlantını ya da bu sayfadan dışarı erişimi kontrol et). Arkadaşınla oynamak için kod ile bağlanmayı deneyebilirsin.</p><button class="btn" id="a1">🔗 Kod ile bağlan</button><button class="btn g" id="a2">Botlarla oyna</button><button class="btn g" id="a3">Geri</button></div>`;
   $('a1').onclick=friend;$('a2').onclick=()=>{tgt={mode:'1v1',key:'x',n:2,manual:0};hostMatch([])};$('a3').onclick=menu}
 function queueTick(dt){const key=tgt.key;
   if(!net){uiT-=dt;if(!netReady){if(uiT<=0){uiT=.4;const q=$('qinfo');if(q)q.textContent='Online bağlanıyor…'}return}
+    if(lobAvail(tgt)){if(!tgt.cn){tgt.cn=1;lobbyOpen(tgt)}if(uiT<=0){uiT=.4;const q=$('qinfo');if(q)q.textContent='Online bağlanıyor…'}return}
     if(tgt.manual)return noNet();tgt.nn=(tgt.nn||0)+dt;const q=$('qinfo');if(q)q.textContent='Online bağlantı yok → botlarla başlıyor…';if(tgt.nn>1.5)hostMatch([]);return}
   if(!tgt.live){tgt.live=1;qT=0}qT+=dt;const all=peersAll(),mp=all.find(p=>p.isMe&&p.sameTab);if(mp)myPeer=mp.peer;
   for(const p of all){const m=p.presence&&p.presence.m;if(m&&!p.isMe&&Array.isArray(m.pl)&&m.pl.includes(myPeer)&&!done.has(m.id)&&p.presence.st&&p.presence.st.ph!=='end')return joinMatch(p.peer,m)}
@@ -1241,9 +1292,9 @@ function queueTick(dt){const key=tgt.key;
   uiT-=dt;if(uiT<=0){uiT=.4;const gb=$('go');if(gb){gb.style.display=host?'':'none';gb.textContent=cand.length>=2?'Başlat':'Botlarla başlat'}
     const names=inq.map(p=>p.isMe?'Sen':(p.presence.nm||'Oyuncu')).join(', '),q=$('qinfo');
     if(q)q.textContent=tgt.auto?'Bağlandın! Maç başlıyor…':tgt.manual?'Odadaki oyuncular ('+cand.length+'): '+names+(host?' · host sensin':' · host başlatınca maç başlar'):'Bulunan oyuncu: '+Math.min(cand.length,need)+'/'+need+' · '+Math.ceil(Math.max(0,(host?QWAIT:QWAIT+4)-qT))+' sn sonra boş yerlere bot gelir'}}
-function startQueue(mode,key,manual,auto){tgt={mode,key,n:mode==='1v1'?2:4,manual,start:0,auto:!!auto};qT=0;scene='queue';G=null;
+function startQueue(mode,key,manual,auto){lastKey=manual&&!auto?key:null;tgt={mode,key,n:mode==='1v1'?2:4,manual,start:0,auto:!!auto};qT=0;scene='queue';G=null;
   ui.innerHTML=`<div class="panel"><h2>${auto?'Arkadaşına bağlanıldı':manual?'Oda: '+key.slice(2):'Rakip aranıyor…'}</h2><p id="qinfo">…</p><p>${auto?'':manual?'Arkadaşların aynı kodu girsin. Herkes görününce host Başlat der (yalnızsan botlarla başlar).':'10 saniye içinde kimse gelmezse boş yerler botlarla dolar. Arkadaşınla oynayacaksan ikiniz de bu süre içinde basın ya da Oda seçeneğini kullanın.'}</p>${manual&&!auto?'<button class="btn" id="go">Başlat</button>':''}<button class="btn g" id="cx">İptal</button></div>`;
-  if($('go'))$('go').onclick=()=>{tgt.start=1};$('cx').onclick=()=>{scene='menu';tgt=null;pub();demo();menu()}}
+  if($('go'))$('go').onclick=()=>{tgt.start=1};$('cx').onclick=()=>{scene='menu';tgt=null;pub();lobbyClose();demo();menu()}}
 
 // ---------- Fizik ----------
 function capV(b,m){const s=Math.hypot(b.vx,b.vy);if(s>m){b.vx*=m/s;b.vy*=m/s}}
@@ -1313,7 +1364,7 @@ function finish(){const g=G;g.ph='end';SFX.whistle();SFX.applause();const draw=g
   const col=tm=>g.pl.filter(p=>p.team===tm).map(p=>`<div class="pr"><span>${p===top&&p.goals>0?'★ ':''}${p===g.me?'Sen':esc(p.name)}${p.bot?' <small>(bot)</small>':''}</span><em>${p.goals}</em></div>`).join('');
   let cf='';if(won)for(let i=0;i<46;i++)cf+=`<i class="cf" style="left:${Math.random()*100}%;background:${['#ffd24a','#ff5c8a','#4a7fe0','#2ec27e','#fff'][i%5]};animation-duration:${2.4+Math.random()*2.2}s;animation-delay:${Math.random()*1.2}s"></i>`;
   setTimeout(()=>{if(G!==g)return;ui.innerHTML=`<div class="cfw">${cf}</div><div class="panel end"><div class="ttl ${won?'win':draw?'draw':'lose'}">${won?'🏆 ':''}${t}</div><div class="sub">MAÇ SONU · ${mm}</div><div class="sc"><div class="tm r"><span>KIRMIZI</span><b>${g.s[0]}</b></div><i>–</i><div class="tm b"><span>MAVİ</span><b>${g.s[1]}</b></div></div><div class="cols"><div class="col r">${col(0)}</div><div class="col b">${col(1)}</div></div><div class="stats"><div><b>${tot}</b>Toplam gol</div><div><b>${g.pwN}</b>Power shot</div><div><b>${top&&top.goals>0?(top===g.me?'Sen':esc(top.name)):'-'}</b>Maçın oyuncusu</div></div><button class="btn" id="again">Tekrar oyna</button><button class="btn g" id="home">Ana menü</button></div>`;
-    $('again').onclick=()=>{const m=g.mode;leave();if(net&&net.p2p)startQueue('1v1','R:P2P',true,true);else startMode(m)};$('home').onclick=()=>leave()},900)}
+    $('again').onclick=()=>{const m=g.mode;leave();if(net&&net.p2p)startQueue('1v1','R:P2P',true,true);else if(lastKey)startQueue('1v1',lastKey,true);else startMode(m)};$('home').onclick=()=>leave()},900)}
 function onKick(){if(scene!=='play'||paused||!G||!G.me||G.ph!=='play')return;const me=G.me;initAudio();
   if(G.client){if(me.kcd<=0){me.kc++;me.kcd=.35;SFX.kick();G.fx.push({x:me.x,y:me.y,t:.25,r:1})}}else{me.kc++;kick(me,me.aim)}}
 
@@ -1429,7 +1480,7 @@ function loop(ts){const dt=Math.min((ts-last)/1000||0,.05);last=ts;tTime=ts/1000
   if(scene==='queue')queueTick(dt);
   if(G&&!paused){if(G.client)stepClient(dt);else step(dt)}
   pubT-=dt;if(pubT<=0){pubT=.05;pub()}
-  olT-=dt;if(olT<=0){olT=.5;const e=$('ol');if(e)e.textContent=net&&net.p2p?'● Arkadaşınla doğrudan bağlısın':net?('● Online bağlı · çevrimiçi oyuncu: '+peersAll().length):'○ Hesap bağlantısı yok · arkadaşınla "kod ile" bağlanabilirsin'}
+  olT-=dt;if(olT<=0){olT=.5;const e=$('ol');if(e)e.textContent=net&&net.p2p?'● Arkadaşınla doğrudan bağlısın':net?('● Online bağlı · odadaki oyuncu: '+peersAll().length):(!roomNet&&typeof Peer==='function')?'● Online hazır · eşleşme başlatınca bağlanır':'○ Hesap bağlantısı yok · arkadaşınla "kod ile" bağlanabilirsin'}
   draw();requestAnimationFrame(loop)}
 document.addEventListener('visibilitychange',()=>{last=performance.now()});
 demo();menu();netInit();requestAnimationFrame(loop);

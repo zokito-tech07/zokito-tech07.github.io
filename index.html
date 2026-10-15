@@ -1157,13 +1157,13 @@ $('mute').onclick=()=>{muted=!muted;$('mute').textContent=muted?'🔇':'🔊'};
 const BOTN=['Leo','Mrnonchalant','Cr7fan','koolcheems86','Pasha','Zeki','Mert','Aslan','Deniz','Kaan','Efe','Ronaldinho'];
 const WIN=3;let hudGe=0,goalAt=-9;
 let G=null,scene='menu',paused=false,modeSel='1v1',wantReal=true,myName=ls('bb_name','Sen'),myPeer='local',tgt=null,qT=0,uiT=0,tTime=0,toastT=0,toastTxt='',showTab=false;
-let net=null,roomNet=null,p2p=null,snap=[];const done=new Set();
+let net=null,roomNet=null,p2p=null,snap=[],netReady=false;const QWAIT=10;const done=new Set();
 const cam={x:FW/2,y:FH/2,z:1},mouse={x:0,y:0,on:false},keys={};let joy={x:0,y:0},tAim=null,pubT=0;
 const peersAll=()=>snap.filter(p=>p.kind==='viewer');
 const toast=m=>{toastTxt=m;toastT=2.6};
 
 // ---------- Ağ (claude room / presence) ----------
-async function netInit(){try{if(!(window.claude&&claude.use))return;const r=await claude.use('room');if(!r)return;net=r;roomNet=r;r.onPeers(c=>{if(net===r)snap=c.peers},()=>{if(net===r)net=null;roomNet=null})}catch(e){net=null}}
+async function netInit(){try{if(!(window.claude&&claude.use))return;const r=await claude.use('room');if(!r)return;net=r;roomNet=r;r.onPeers(c=>{if(net===r)snap=c.peers},()=>{if(net===r)net=null;roomNet=null})}catch(e){net=null}finally{netReady=true}}
 function pub(){if(!net)return;/* presence birleştirilir: kullanılmayan alanlar açıkça null yapılmalı yoksa eski değerler kalır */
   const o={nm:myName,g:null,mid:null,m:null,st:null,p:null};
   if(scene==='queue'&&tgt)o.g=tgt.key;
@@ -1227,15 +1227,22 @@ function p2pJoin(){const pc=new RTCPeerConnection(ICE);pc.ondatachannel=e=>p2pWi
     $('ans').innerHTML=`<p>2) Bu cevap kodunu arkadaşına geri gönder, o girince maç başlar:</p><textarea id="c2" readonly>${code}</textarea><button class="btn g" id="cp">Kopyala</button>`;$('cp').onclick=()=>copyTxt('c2');st.textContent='Arkadaşının bağlanmasını bekliyorum…'}catch(e){st.textContent='Kod geçersiz, tekrar yapıştır.'}}}
 
 // ---------- Eşleşme ----------
-function queueTick(dt){qT+=dt;const key=tgt.key,all=peersAll(),mp=all.find(p=>p.isMe&&p.sameTab);if(mp)myPeer=mp.peer;
+function noNet(){scene='menu';tgt=null;ui.innerHTML=`<div class="panel wide"><h2>Online bağlantı yok</h2><p>Bu görünümde claude.ai oda bağlantısı kurulamadı (linki giriş yapmadan ya da herkese açık bağlantıyla açmış olabilirsin). Arkadaşınla oynamak için kod ile bağlanabilirsin.</p><button class="btn" id="a1">🔗 Kod ile bağlan</button><button class="btn g" id="a2">Botlarla oyna</button><button class="btn g" id="a3">Geri</button></div>`;
+  $('a1').onclick=friend;$('a2').onclick=()=>{tgt={mode:'1v1',key:'x',n:2,manual:0};hostMatch([])};$('a3').onclick=menu}
+function queueTick(dt){const key=tgt.key;
+  if(!net){uiT-=dt;if(!netReady){if(uiT<=0){uiT=.4;const q=$('qinfo');if(q)q.textContent='Online bağlanıyor…'}return}
+    if(tgt.manual)return noNet();tgt.nn=(tgt.nn||0)+dt;const q=$('qinfo');if(q)q.textContent='Online bağlantı yok → botlarla başlıyor…';if(tgt.nn>1.5)hostMatch([]);return}
+  if(!tgt.live){tgt.live=1;qT=0}qT+=dt;const all=peersAll(),mp=all.find(p=>p.isMe&&p.sameTab);if(mp)myPeer=mp.peer;
   for(const p of all){const m=p.presence&&p.presence.m;if(m&&!p.isMe&&Array.isArray(m.pl)&&m.pl.includes(myPeer)&&!done.has(m.id)&&p.presence.st&&p.presence.st.ph!=='end')return joinMatch(p.peer,m)}
-  const cand=all.filter(p=>p.presence&&p.presence.g===key&&!p.presence.mid).map(p=>p.peer).sort(),need=tgt.n;
-  if(tgt.manual){if(cand[0]===myPeer&&(tgt.start||(tgt.auto&&cand.length>=2))){tgt.start=0;const n=cand.length>2?4:2;tgt.mode=n===4?'2v2':'1v1';hostMatch(cand.slice(0,n))}}
-  else if(net&&cand[0]===myPeer){if(cand.length>=need||qT>12)hostMatch(cand.slice(0,need))}
-  else if(qT>(net?16:2.2))hostMatch([]);
-  uiT-=dt;if(uiT<=0){uiT=.4;const gb=$('go');if(gb)gb.style.display=cand[0]===myPeer?'':'none';const q=$('qinfo');if(q)q.textContent=tgt.auto?'Bağlandın! Maç başlıyor…':tgt.manual?'Odadaki oyuncular: '+cand.length+(cand[0]===myPeer?' (host sensin, Başlat de)':' (host başlatınca maç başlar)'):'Bulunan oyuncu: '+Math.min(cand.length,need)+'/'+need+(net?'':' (çevrimiçi bağlantı yok → botlar)')}}
+  const inq=all.filter(p=>p.presence&&p.presence.g===key&&!p.presence.mid),cand=inq.map(p=>p.peer).sort(),need=tgt.n,host=cand[0]===myPeer;
+  if(tgt.manual){if(host&&(tgt.start||(tgt.auto&&cand.length>=2))){tgt.start=0;const n=cand.length>2?4:2;tgt.mode=n===4?'2v2':'1v1';hostMatch(cand.slice(0,n))}}
+  else if(host){if(cand.length>=need||qT>QWAIT)hostMatch(cand.slice(0,need))}
+  else if(qT>QWAIT+4)hostMatch([]);
+  uiT-=dt;if(uiT<=0){uiT=.4;const gb=$('go');if(gb){gb.style.display=host?'':'none';gb.textContent=cand.length>=2?'Başlat':'Botlarla başlat'}
+    const names=inq.map(p=>p.isMe?'Sen':(p.presence.nm||'Oyuncu')).join(', '),q=$('qinfo');
+    if(q)q.textContent=tgt.auto?'Bağlandın! Maç başlıyor…':tgt.manual?'Odadaki oyuncular ('+cand.length+'): '+names+(host?' · host sensin':' · host başlatınca maç başlar'):'Bulunan oyuncu: '+Math.min(cand.length,need)+'/'+need+' · '+Math.ceil(Math.max(0,(host?QWAIT:QWAIT+4)-qT))+' sn sonra boş yerlere bot gelir'}}
 function startQueue(mode,key,manual,auto){tgt={mode,key,n:mode==='1v1'?2:4,manual,start:0,auto:!!auto};qT=0;scene='queue';G=null;
-  ui.innerHTML=`<div class="panel"><h2>${auto?'Arkadaşına bağlanıldı':manual?'Oda: '+key.slice(2):'Rakip aranıyor…'}</h2><p id="qinfo">…</p><p>${auto?'':manual?'Arkadaşların aynı kodu girsin. Host "Başlat" der, eksikler botla dolar.':'Rakip 12 sn içinde bulunamazsa boş yerler botlarla dolar. Arkadaşınla oynayacaksan aynı anda basın ya da Oda / Kod ile bağlan seçeneğini kullan.'}</p>${manual&&!auto?'<button class="btn" id="go">Başlat</button>':''}<button class="btn g" id="cx">İptal</button></div>`;
+  ui.innerHTML=`<div class="panel"><h2>${auto?'Arkadaşına bağlanıldı':manual?'Oda: '+key.slice(2):'Rakip aranıyor…'}</h2><p id="qinfo">…</p><p>${auto?'':manual?'Arkadaşların aynı kodu girsin. Herkes görününce host Başlat der (yalnızsan botlarla başlar).':'10 saniye içinde kimse gelmezse boş yerler botlarla dolar. Arkadaşınla oynayacaksan ikiniz de bu süre içinde basın ya da Oda seçeneğini kullanın.'}</p>${manual&&!auto?'<button class="btn" id="go">Başlat</button>':''}<button class="btn g" id="cx">İptal</button></div>`;
   if($('go'))$('go').onclick=()=>{tgt.start=1};$('cx').onclick=()=>{scene='menu';tgt=null;pub();demo();menu()}}
 
 // ---------- Fizik ----------
@@ -1397,10 +1404,10 @@ function menu(){scene='menu';ui.innerHTML=`<h1>BEATBALL<small>hayran yapımı ·
   ui.querySelectorAll('.card').forEach(c=>{const f=()=>{initAudio();SFX.click();myName=($('nm').value||'Sen').trim().slice(0,12);try{localStorage.setItem('bb_name',myName)}catch(e){}c.dataset.m==='custom'?custom():startMode(c.dataset.m)};c.onclick=f;c.onkeydown=e=>{if(e.key==='Enter')f()}});
   $('fr').onclick=()=>{initAudio();SFX.click();friend()};
   $('seg').onclick=e=>{const r=e.target.dataset.r;if(r!=null){wantReal=r==='1';menu()}}}
-function startMode(m){tgt={mode:m,key:m,n:m==='1v1'?2:4};if(wantReal&&net)startQueue(m,m,false);else{tgt.manual=0;hostMatch([])}}
-function custom(){ui.innerHTML=`<div class="panel"><h2>Özel oda</h2><p>Bir oda kodu yaz. Arkadaşların aynı kodu girip katılsın.</p><input id="rc" maxlength="8" placeholder="KOD" style="text-transform:uppercase;letter-spacing:3px"><br><br><button class="btn" id="mk">Odaya gir</button><button class="btn g" id="bk">Geri</button><p style="margin-top:10px">${net?'':'Çevrimiçi bağlantı bu görünümde yok; oda yalnızca sana özel olur.'}</p></div>`;
+function startMode(m){tgt={mode:m,key:m,n:m==='1v1'?2:4};if(wantReal)startQueue(m,m,false);else{tgt.manual=0;hostMatch([])}}
+function custom(){ui.innerHTML=`<div class="panel"><h2>Özel oda</h2><p>Bir oda kodu yaz. Arkadaşların aynı kodu girip katılsın.</p><input id="rc" maxlength="8" placeholder="KOD" style="text-transform:uppercase;letter-spacing:3px"><br><br><button class="btn" id="mk">Odaya gir</button><button class="btn g" id="bk">Geri</button></div>`;
   $('rc').value=Math.random().toString(36).slice(2,6).toUpperCase();$('bk').onclick=menu;
-  $('mk').onclick=()=>{const c=($('rc').value||'ODA').toUpperCase().trim();if(!net){tgt={mode:'1v1',key:'x',n:2};hostMatch([]);return}startQueue('1v1','R:'+c,true)}}
+  $('mk').onclick=()=>{const c=($('rc').value||'ODA').toUpperCase().trim();startQueue('1v1','R:'+c,true)}}
 $('bot').onclick=()=>{if(scene!=='play'||paused)return;paused=!G.client&&!G.demo;ui.innerHTML=`<div class="panel"><h2>Menu</h2><button class="btn" id="rs">Devam</button><button class="btn g" id="lv">Maçtan ayrıl</button></div>`;$('rs').onclick=()=>{paused=false;ui.innerHTML=''};$('lv').onclick=()=>{paused=false;leave()}};
 
 // ---------- Girdi ----------
